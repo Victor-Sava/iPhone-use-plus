@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_recovery.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """Bounded WDA channel recovery without repeating the user's phone actions."""
 from pathlib import Path
 import sys
@@ -218,7 +222,8 @@ class RecoveryTests(unittest.TestCase):
 
     def test_locked_phone_never_recreates_session_or_restarts_service(self):
         self.client.locked = True
-        error = self.assert_error("phone_locked", screenshot=False)
+        with patch.object(self.client, "request", side_effect=WDAError("phone_locked", "Device requires unlock")):
+            error = self.assert_error("phone_locked", screenshot=False)
         self.assertEqual(error["code"], "phone_locked")
         self.assertIsNone(self.client.session_id)
         self.manager.recover.assert_not_called()
@@ -229,6 +234,8 @@ class RecoveryTests(unittest.TestCase):
         original = self.client.request
 
         def request(method, path, payload=None, timeout=None):
+            if path == "/wda/locked" and self.client.locked:
+                raise WDAError("phone_locked", "Device requires unlock")
             result = original(method, path, payload, timeout)
             if path == "/wda/activeAppInfo":
                 self.client.locked = True

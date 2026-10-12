@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_client.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import contextlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -83,6 +87,8 @@ class ClientTests(unittest.TestCase):
 
     def test_reuses_http_connection_and_obeys_server_close(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 200, {"value": {"ready": True}}, 0, path == "/close"
 
         with fake_server(respond) as (url, requests, ports):
@@ -98,6 +104,8 @@ class ClientTests(unittest.TestCase):
 
     def test_explicit_invalid_session_read_creates_one_session_and_retries_once(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session":
                 return 200, {"value": {"sessionId": "fresh"}}, 0, False
             if path == "/session/expired/window/size":
@@ -111,7 +119,7 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(client.session("GET", "/window/size"), {"width": 390, "height": 844})
                 self.assertEqual([(r[0], r[1]) for r in requests], [
                     ("GET", "/session/expired/window/size"), ("POST", "/session"),
-                    ("POST", "/session/fresh/appium/settings"),
+                    ("GET", "/wda/screens"), ("POST", "/session/fresh/appium/settings"),
                     ("GET", "/session/fresh/window/size")])
                 self.assertEqual(client.session_id, "fresh")
             finally:
@@ -119,6 +127,8 @@ class ClientTests(unittest.TestCase):
 
     def test_explicit_invalid_session_mutation_is_not_replayed(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -136,6 +146,8 @@ class ClientTests(unittest.TestCase):
 
     def test_expired_element_read_is_not_replayed_in_new_session(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -153,6 +165,8 @@ class ClientTests(unittest.TestCase):
 
     def test_mutation_timeout_is_uncertain_and_never_replayed(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 200, {"value": None}, 0.15, False
 
         with fake_server(respond) as (url, requests, _):
@@ -171,6 +185,8 @@ class ClientTests(unittest.TestCase):
 
     def test_non_session_read_error_does_not_trigger_retry(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 500, {"value": {"error": "unknown error", "message": "Backend failed"}}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -187,6 +203,8 @@ class ClientTests(unittest.TestCase):
 
     def test_element_lookup_reconnects_once_after_disconnect(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if len(requests) == 1:
                 return None, None, 0, True
             return 200, {"value": [{"ELEMENT": "found"}]}, 0, False
@@ -205,6 +223,8 @@ class ClientTests(unittest.TestCase):
 
     def test_get_reconnects_once_after_disconnect(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return (None, None, 0, True) if len(requests) == 1 else (200, {"value": "xml"}, 0, False)
 
         with fake_server(respond) as (url, requests, _):
@@ -217,6 +237,8 @@ class ClientTests(unittest.TestCase):
 
     def test_element_lookup_invalid_session_recreates_and_retries_query_once(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session/expired/elements":
                 return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
             if path == "/session":
@@ -230,12 +252,14 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(client.session("POST", "/elements", {"using": "name", "value": "A"}),
                                  [{"ELEMENT": "fresh-element"}])
                 self.assertEqual([path for _, path, _ in requests], [
-                    "/session/expired/elements", "/session", "/session/fresh/appium/settings", "/session/fresh/elements"])
+                    "/session/expired/elements", "/session", "/wda/screens", "/session/fresh/appium/settings", "/session/fresh/elements"])
             finally:
                 client.close()
 
     def test_invalid_session_lookup_is_retried_only_once(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session":
                 return 200, {"value": {"sessionId": "fresh"}}, 0, False
             if path.endswith("/appium/settings"):
@@ -249,7 +273,7 @@ class ClientTests(unittest.TestCase):
                 with self.assertRaises(WDAError) as caught:
                     client.session("POST", "/elements", {})
                 self.assertFalse(caught.exception.uncertain)
-                self.assertEqual(len(requests), 4)
+                self.assertEqual(len(requests), 5)
                 self.assertEqual(sum(path == "/session" for _, path, _ in requests), 1)
                 self.assertIsNone(client.session_id)
             finally:
@@ -257,6 +281,8 @@ class ClientTests(unittest.TestCase):
 
     def test_descendant_lookup_does_not_carry_old_element_across_sessions(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -300,6 +326,8 @@ class ClientTests(unittest.TestCase):
                                (b"not json", "invalid_response"), ({}, "http_error")):
             with self.subTest(code=code):
                 def respond(method, path, body, requests):
+                    if path == "/wda/screens":
+                        return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
                     return 500, response, 0, False
                 with fake_server(respond) as (url, requests, _):
                     client = WDAClient(url)
@@ -318,6 +346,8 @@ class ClientTests(unittest.TestCase):
                      "/wda/homescreen", "/wda/apps/activate", "/wda/dragfromtoforduration"):
             with self.subTest(path=path):
                 def respond(method, path, body, requests):
+                    if path == "/wda/screens":
+                        return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
                     return None, None, 0, True
                 with fake_server(respond) as (url, requests, _):
                     client = WDAClient(url)
@@ -333,6 +363,8 @@ class ClientTests(unittest.TestCase):
 
     def test_upstream_state_changing_healthcheck_is_not_replayed(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return None, None, 0, True
 
         with fake_server(respond) as (url, requests, _):
@@ -347,6 +379,8 @@ class ClientTests(unittest.TestCase):
 
     def test_new_session_sets_fast_timeouts_once(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session":
                 return 200, {"value": {"sessionId": "fresh"}}, 0, False
             return 200, {"value": {}}, 0, False
@@ -358,9 +392,9 @@ class ClientTests(unittest.TestCase):
                 self.assertEqual(client.ensure_session(), "fresh")
                 client.session("GET", "/source")
                 self.assertEqual([path for _, path, _ in requests], [
-                    "/session", "/session/fresh/appium/settings", "/session/fresh/source"])
+                    "/session", "/wda/screens", "/session/fresh/appium/settings", "/session/fresh/source"])
                 self.assertEqual(requests[0][2]["capabilities"]["alwaysMatch"]["waitForIdleTimeout"], 0)
-                self.assertEqual(requests[1][2], {"settings": SESSION_SETTINGS})
+                self.assertEqual(requests[2][2], {"settings": dict(SESSION_SETTINGS, currentDisplayId=3)})
                 self.assertEqual((SESSION_SETTINGS["waitForIdleTimeout"], SESSION_SETTINGS["animationCoolOffTimeout"]), (0, 0))
                 # Queries return rect and type inline, so target selection needs no follow-up reads.
                 self.assertIs(SESSION_SETTINGS["shouldUseCompactResponses"], False)
@@ -371,6 +405,8 @@ class ClientTests(unittest.TestCase):
 
     def test_persisted_session_sets_fast_timeouts_once_without_session_creation(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 200, {"value": {}}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -381,8 +417,8 @@ class ClientTests(unittest.TestCase):
                 client.session("GET", "/source")
                 client.session("GET", "/source")
                 self.assertEqual([path for _, path, _ in requests], [
-                    "/session/persisted/appium/settings", "/session/persisted/source", "/session/persisted/source"])
-                self.assertEqual(requests[0][2], {"settings": SESSION_SETTINGS})
+                    "/wda/screens", "/session/persisted/appium/settings", "/session/persisted/source", "/session/persisted/source"])
+                self.assertEqual(requests[1][2], {"settings": dict(SESSION_SETTINGS, currentDisplayId=3)})
             finally:
                 client.close()
 
@@ -390,6 +426,8 @@ class ClientTests(unittest.TestCase):
         for method, path in (("POST", "/elements"), ("POST", "/wda/tap")):
             with self.subTest(method=method, path=path):
                 def respond(method, path, body, requests):
+                    if path == "/wda/screens":
+                        return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
                     if path == "/session/persisted/appium/settings":
                         return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
                     if path == "/session":
@@ -402,17 +440,19 @@ class ClientTests(unittest.TestCase):
                         if path == "/elements":
                             self.assertEqual(client.session(method, path, {}), [])
                             self.assertEqual([route for _, route, _ in requests], [
-                                "/session/persisted/appium/settings", "/session", "/session/fresh/appium/settings", "/session/fresh/elements"])
+                                "/wda/screens", "/session/persisted/appium/settings", "/session", "/wda/screens", "/session/fresh/appium/settings", "/session/fresh/elements"])
                         else:
                             with self.assertRaises(WDAError):
                                 client.session(method, path, {})
                             self.assertIsNone(client.session_id)
-                            self.assertEqual(len(requests), 1)
+                            self.assertEqual(len(requests), 2)
                     finally:
                         client.close()
 
     def test_settings_failure_keeps_session_and_is_not_replayed(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session":
                 return 200, {"value": {"sessionId": "created"}}, 0, False
             return None, None, 0, True
@@ -428,12 +468,14 @@ class ClientTests(unittest.TestCase):
                     self.assertFalse(caught.exception.details["settings_applied"])
                     self.assertFalse(caught.exception.details["settings_replayed"])
                 self.assertEqual(client.session_id, "created")
-                self.assertEqual(len(requests), 2)
+                self.assertEqual(len(requests), 3)
             finally:
                 client.close()
 
     def test_settings_explicit_invalid_session_clears_real_session_state(self):
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             if path == "/session":
                 return 200, {"value": {"sessionId": "created"}}, 0, False
             return 404, {"value": {"error": "invalid session id", "message": "Expired"}}, 0, False
@@ -445,7 +487,7 @@ class ClientTests(unittest.TestCase):
                     client.ensure_session()
                 self.assertEqual(caught.exception.code, "invalid session id")
                 self.assertIsNone(client.session_id)
-                self.assertEqual(len(requests), 2)
+                self.assertEqual(len(requests), 3)
             finally:
                 client.close()
 
@@ -453,6 +495,8 @@ class ClientTests(unittest.TestCase):
         phrase = "你好 👋 Café 漢字"
 
         def respond(method, path, body, requests):
+            if path == "/wda/screens":
+                return 200, {"value": [{"displayId": 9}, {"displayId": 3}]}, 0, False
             return 200, {"value": phrase}, 0, False
 
         with fake_server(respond) as (url, requests, _):
@@ -468,6 +512,31 @@ class ClientTests(unittest.TestCase):
                 self.assertIn("/session/:id/element/:id/value", metrics)
             finally:
                 client.close()
+
+    def test_explicit_ready_refresh_tracks_display_order_without_new_session(self):
+        client = WDAClient()
+        self.warm_session(client, "existing")
+        with patch.object(client, "request", side_effect=[
+                {"value": [{"displayId": 9}, {"displayId": 3}]}, {"value": {}},
+                {"value": [{"displayId": 1}]}, {"value": {}}]) as request:
+            client.ensure_session(refresh_display=True)
+            client.ensure_session(refresh_display=True)
+        self.assertEqual([c.args[1] for c in request.call_args_list], [
+            "/wda/screens", "/session/existing/appium/settings",
+            "/wda/screens", "/session/existing/appium/settings"])
+        self.assertEqual(request.call_args_list[1].args[2]["settings"]["currentDisplayId"], 3)
+        self.assertEqual(request.call_args_list[3].args[2]["settings"]["currentDisplayId"], 1)
+
+    def test_invalid_display_list_never_sends_settings_or_phone_actions(self):
+        for screens in ([], None, [{"displayId": True}], [{"displayId": "2"}], [{}]):
+            with self.subTest(screens=screens):
+                client = WDAClient()
+                self.warm_session(client, "existing")
+                with patch.object(client, "request", return_value={"value": screens}) as request:
+                    with self.assertRaises(WDAError):
+                        client.ensure_session(refresh_display=True)
+                request.assert_called_once()
+                self.assertEqual(request.call_args.args[:2], ("GET", "/wda/screens"))
 
     def test_rejects_remote_or_decorated_urls(self):
         for url in ("http://192.168.1.2:8100", "https://localhost:8100", "http://user@localhost", "http://localhost/api", "http://localhost?token=x"):

@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_fallback.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import contextlib
 import fcntl
 import importlib.util
@@ -93,12 +97,12 @@ class FallbackTests(unittest.TestCase):
         self.assertEqual(self.client.calls, [])
         self.assertTrue(self.closed)
 
-    def test_fallback_cannot_bypass_locked_phone(self):
-        self.client.locked = True
+    def test_fallback_preserves_backend_lock_error_without_replay(self):
+        self.client.home_error = WDAError("phone_locked", "Device requires unlock")
         status, result, _ = self.invoke('{"name":"home","observe":"none"}')
         self.assertEqual(status, 1)
         self.assertEqual(result["error"]["code"], "phone_locked")
-        self.assertEqual(self.client.actions(), [])
+        self.assertEqual([path for _, path, _ in self.client.actions()], ["/wda/homescreen"])
         self.assertTrue(self.closed)
 
     def test_fallback_does_not_replay_an_uncertain_mutation(self):

@@ -1,5 +1,13 @@
 # 更新记录
 
+## Plus — unreleased
+
+- Restore the locally validated lock/mirroring behavior and last-display selection to source control.
+- Route mirrored WDA gestures and element coordinates to the selected display; preserve existing foreground mirror applications.
+- Share USB/Wi-Fi transport between control and video, and automatically follow display changes while preserving authentication pauses.
+- Package the pinned WDA patch with build-fingerprint checks and document setup in README.plus.md.
+- Merge the existing 0.3.10 changes; validate 431 Python tests and 33 widget tests plus the widget build.
+
 ## 0.3.10 — 2026-10-10
 
 - 首次打开手机侧边栏、等待预览第一帧及初始化重试时显示旋转 loading 图标，不再将尚未收到画面误报为手机未连接。

@@ -1,4 +1,6 @@
-# iPhone Use
+# iPhone Use Plus
+
+本分支的镜像/Wi-Fi 增强、WDA 补丁安装与限制见 [Plus 说明](README.plus.md)。
 
 **中文** · [English](README.en.md)
 
@@ -18,7 +20,7 @@ iPhone Use 使用 [WebDriverAgent](https://github.com/appium/WebDriverAgent)（W
 
 ```text
 请帮我安装和配置 iPhone Use：
-https://github.com/zhongerxin/iPhone-use
+https://github.com/Victor-Sava/iPhone-use-plus
 
 先读取仓库 README 和安装脚本，检查本机 Codex CLI、Python、Node.js、npm、
 完整 Xcode，以及通过 USB 连接的 iPhone。把项目放到合适的本机目录，
@@ -68,8 +70,8 @@ Xcode 需要支持手机当前的 iOS 版本。无需越狱，也无需单独启
 ### 安装插件
 
 ```sh
-git clone https://github.com/zhongerxin/iPhone-use.git
-cd iPhone-use
+git clone https://github.com/Victor-Sava/iPhone-use-plus.git
+cd iPhone-use-plus
 sh scripts/install.sh
 ```
 

@@ -1,5 +1,10 @@
 """Private, asynchronous Xcode / USB lifecycle for a pinned WebDriverAgent.
 
+[INPUT]: 依赖 Xcode、设备配置、tooling 传输与 DisplayMonitor 显示跟随。
+[OUTPUT]: 提供设备发现、精确补丁校验、含补丁指纹的构建与受控服务生命周期。
+[POS]: server 的安装启动边界；将传输脚本部署到私有运行目录。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+
 No shell command input is accepted. Long jobs survive the MCP process; stop only
 signals a process group whose live leader carries this job's ownership token.
 """
@@ -27,6 +32,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+from wda_display import DisplayMonitor
 
 WDA_COMMIT = "d17782422d55ff1e5e0ceb74eb1fd509cc0c35b6"
 WDA_VERSION = "16.14.0"
@@ -184,8 +191,13 @@ class SetupManager:
         if not revision["ok"] or revision["stdout"].strip() != WDA_COMMIT:
             raise ValueError(f"WDA source must be pinned to {WDA_VERSION} ({WDA_COMMIT}); existing checkouts are never changed automatically.")
         dirty = _run(["git", "-C", str(source), "status", "--porcelain", "--untracked-files=no"])
-        if not dirty["ok"] or dirty["stdout"].strip():
-            raise ValueError("Pinned WDA source has tracked changes. Use fetch for a clean isolated checkout; existing work is preserved.")
+        if not dirty["ok"]:
+            raise ValueError("Cannot inspect pinned WDA source changes.")
+        if dirty["stdout"].strip():
+            patch = PLUGIN_ROOT / "tooling/wda-mirroring.patch"
+            actual = _run(["git", "-C", str(source), "diff", "HEAD", "--binary"])
+            if not (patch.is_file() and actual["ok"] and actual["stdout"] == patch.read_text()):
+                raise ValueError("Pinned WDA changes must exactly match tooling/wda-mirroring.patch; existing work is preserved.")
         return source
 
     @staticmethod
@@ -393,9 +405,17 @@ class SetupManager:
                 and job["config"].get("local_port") == self.port
                 and job.get("base_url", self.base_url) == self.base_url)
 
+    def _source_patch_hash(self, config):
+        """构建身份包含实际源码补丁，补丁变化必须重新构建。"""
+        diff = _run(["git", "-C", config["source_dir"], "diff", "HEAD", "--binary"])
+        if not diff["ok"]:
+            raise ValueError("Cannot fingerprint WDA source changes.")
+        return hashlib.sha256(diff["stdout"].encode()).hexdigest() if diff["stdout"] else None
+
     def _require_build(self, config):
         marker = _read_json(self.state_dir / "build.json", {})
-        if marker.get("config_fingerprint") != _fingerprint(config) or marker.get("commit") != WDA_COMMIT:
+        if (marker.get("config_fingerprint") != _fingerprint(config) or marker.get("commit") != WDA_COMMIT
+                or marker.get("source_patch_hash") != self._source_patch_hash(config)):
             raise ValueError("Run build successfully for this configuration before start; start uses test-without-building.")
 
     @staticmethod
@@ -809,7 +829,7 @@ def _worker(state_dir, job_id, owner_token, base_url):
                 with contextlib.suppress(FileNotFoundError):
                     (manager.state_dir / "build.json").unlink()
                 run(manager._build_command(config, "build-for-testing"), cwd=source)
-                _write_json(manager.state_dir / "build.json", {"config_fingerprint": _fingerprint(config), "commit": WDA_COMMIT, "built_at": _now()})
+                _write_json(manager.state_dir / "build.json", {"config_fingerprint": _fingerprint(config), "commit": WDA_COMMIT, "source_patch_hash": manager._source_patch_hash(config), "built_at": _now()})
             else:
                 if action == "recover":
                     # /status.ready cannot verify XCTest authorization. This
@@ -822,7 +842,7 @@ def _worker(state_dir, job_id, owner_token, base_url):
                     _write_json(path, job)
                 forward = manager.state_dir / "runtime/forward"
                 forward.mkdir(exist_ok=True, mode=0o700)
-                for name in ("package.json", "package-lock.json", "forward.mjs"):
+                for name in ("package.json", "package-lock.json", "forward.mjs", "device-connection.mjs"):
                     shutil.copyfile(PLUGIN_ROOT / "tooling" / name, forward / name)
                     (forward / name).chmod(0o600)
                 lock_hash = hashlib.sha256((forward / "package-lock.json").read_bytes()).hexdigest()
@@ -835,6 +855,7 @@ def _worker(state_dir, job_id, owner_token, base_url):
                     raise RuntimeError("USB forward failed to start; inspect the log tail.")
                 xcode = launch(manager._build_command(config, "test-without-building"), source)
                 next_status_probe = 0
+                display_monitor = DisplayMonitor(manager.state_dir, manager.base_url)
                 # Keep both children owned and watch either side fail.
                 while not stopping and all(child.poll() is None for child in (forward_child, xcode)):
                     if action == "recover" and job.get("recovery_phase") == "starting" and time.monotonic() >= next_status_probe:
@@ -845,7 +866,11 @@ def _worker(state_dir, job_id, owner_token, base_url):
                             job.update(recovery_phase="serving", service_started_at=_now())
                             _write_json(path, job)
                         next_status_probe = time.monotonic() + 1
+                    display_change = display_monitor.tick()
+                    if display_change:
+                        _write_json(manager.state_dir / "display-monitor.json", {**display_change, "observed_at": _now()})
                     time.sleep(0.25)
+                display_monitor.close()
                 if stopping:
                     raise InterruptedError("Stopped by owner request.")
                 raise RuntimeError("WDA runner or USB forward exited; inspect the log tail and start again.")
@@ -858,6 +883,8 @@ def _worker(state_dir, job_id, owner_token, base_url):
         job.update(state="failed", completed_at=_now(), error=_redact(error))
         print(_redact(error), file=sys.stderr, flush=True)
     finally:
+        if "display_monitor" in locals():
+            display_monitor.close()
         # All commands inherit this worker's group. Broadcast TERM to include
         # grandchildren, temporarily ignoring it in the leader while cleaning up.
         if os.getpgrp() == os.getpid():

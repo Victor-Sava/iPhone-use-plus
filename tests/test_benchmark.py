@@ -1,3 +1,7 @@
+# [INPUT]: 插件实现与隔离测试替身。
+# [OUTPUT]: test_benchmark.py 的行为回归检查。
+# [POS]: tests 验收层，不触碰真实设备。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import importlib.util
 import json
 from pathlib import Path
@@ -60,7 +64,7 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(task["calls"], 4)
 
     def test_not_ready_phone_is_left_alone(self):
-        self.client.locked = True
+        self.client.status_ready = False
         result = benchmark.Benchmark(self.runtime, iphone_use).run()
         self.assertFalse(result["complete"])
         self.assertEqual([task["task"] for task in result["tasks"]], ["ready"])

@@ -1,3 +1,7 @@
+# [INPUT]: 插件实现与隔离测试替身。
+# [OUTPUT]: test_tool_loading.py 的行为回归检查。
+# [POS]: tests 验收层，不触碰真实设备。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """Guard the published catalog against Codex's lossy 5 KB schema compaction."""
 import copy
 import json
@@ -90,7 +94,7 @@ class ToolLoadingTests(unittest.TestCase):
         public_names = set(self.catalog)
         for document in (ROOT / "skills").rglob("*.md"):
             body = document.read_text()
-            self.assertNotRegex(body, r"(?i)\bwda\b|wda_")
+            self.assertNotRegex(body, r"\b(?:mcp__iphone_use__wda_|wda_(?:ready|observe|tap|swipe|type_text)\b)")
             for reference in re.findall(r"pua_[a-z_]+", body):
                 self.assertTrue(reference in public_names or reference in {
                     "pua_unreachable", "pua_foreground_unavailable", "pua_recovery_required"

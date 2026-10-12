@@ -1,4 +1,10 @@
-"""Direct, persistent PUA HTTP transport. No Appium server, no action replay."""
+"""Direct, persistent PUA HTTP transport. No Appium server, no action replay.
+
+[INPUT]: 依赖本机 WDA HTTP 服务的会话、显示枚举与设置接口。
+[OUTPUT]: 提供 WDAClient 通信、会话配置与 WDAError 错误边界。
+[POS]: 控制器的传输层；会话初始化与显式 READY 按枚举顺序选择最后一个显示，供截图与 MJPEG 共用。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
 import collections
 import http.client
 import json
@@ -153,7 +159,7 @@ class WDAClient:
             self.records.append({"method": method, "endpoint": endpoint, "seconds": round(time.monotonic()-started, 4),
                                  "status": status, "error": code, "bytes": received})
 
-    def ensure_session(self, timeout=None):
+    def ensure_session(self, timeout=None, refresh_display=False):
         deadline = time.monotonic() + (30 if timeout is None else timeout)
         created = False
         if not self.session_id:
@@ -166,14 +172,22 @@ class WDAClient:
             if not self.session_id:
                 raise WDAError("invalid_response", "PUA did not return a session ID.")
             created = True
-        if self.session_id != self._settings_session_id:
-            # These settings are supported by the pinned WDA's FBSettingsHandler.
-            # Configure once for both newly created and persisted sessions adopted
-            # by this client. Never add a settings request to each phone action.
+        if self.session_id != self._settings_session_id or refresh_display:
+            # --- 显示选择 ---
+            # 新建或接管会话时配置一次；显式 READY 重新枚举，以跟随镜像连接变化。
+            # 按服务返回顺序选最后一个显示，不假定编号或取最大编号。
             self._settings_session_id, self._settings_error = self.session_id, None
             try:
+                screens = self.request("GET", "/wda/screens", timeout=self.remaining(deadline)).get("value")
+                if not isinstance(screens, list) or not screens:
+                    raise WDAError("display_unavailable", "WDA returned no available displays.")
+                last_screen = screens[-1]
+                display_id = last_screen.get("displayId") if isinstance(last_screen, dict) else None
+                if type(display_id) is not int:
+                    raise WDAError("invalid_response", "WDA's last display has no integer displayId.")
+                settings = dict(SESSION_SETTINGS, currentDisplayId=display_id)
                 self.request("POST", f"/session/{self.session_id}/appium/settings", {
-                    "settings": dict(SESSION_SETTINGS)}, timeout=self.remaining(deadline))
+                    "settings": settings}, timeout=self.remaining(deadline))
             except WDAError as exc:
                 exc.details.update({"operation": "session_settings", "session_created": created,
                                     "session_available": exc.code != "invalid session id",

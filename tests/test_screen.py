@@ -1,3 +1,7 @@
+# [INPUT]: 插件实现与隔离测试替身。
+# [OUTPUT]: test_screen.py 的行为回归检查。
+# [POS]: tests 验收层，不触碰真实设备。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import base64
 import contextlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -332,6 +336,7 @@ class NodeStreamTests(unittest.TestCase):
                 runtime = Path(temporary)
                 script = runtime / "screen-stream.mjs"
                 script.write_bytes((ROOT / "tooling/screen-stream.mjs").read_bytes())
+                (runtime / "device-connection.mjs").write_bytes((ROOT / "tooling/device-connection.mjs").read_bytes())
                 stub = runtime / "node_modules/appium-ios-device"
                 stub.mkdir(parents=True)
                 (stub / "package.json").write_text('{"type":"module","main":"index.js"}')

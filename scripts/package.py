@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Build separate source and install packages, keeping the complete widget."""
+"""[INPUT]: 插件清单、服务源码、屏幕资源及 tooling 传输/补丁。
+[OUTPUT]: 保留完整运行依赖的源码包与安装包。
+[POS]: scripts 发布边界，显式白名单必须覆盖本地 WDA 改造依赖。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
 import argparse
 import json
 from pathlib import Path
@@ -9,11 +13,11 @@ import sys
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','ANALYTICS.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
+FILES=('plugin.json','mcp.json','.mcp.json','.codex-plugin/plugin.json','.agents/plugins/marketplace.json','README.md','README.en.md','README.plus.md','ANALYTICS.md','CHANGELOG.md','LICENSE','THIRD_PARTY_NOTICES.md','ui/package.json','ui/package-lock.json','ui/build.mjs','ui/src/app.ts','ui/index.html','ui/style.css','ui/tsconfig.json','ui/tests/widget.test.mjs')
 DIRS=('assets','server','skills')
 INSTALL_SCRIPTS=('phone.py','wda.sh','update_app_catalog.py','check_screen_ui.py','package.py','install.sh','register_mcp.py')
 SOURCE_DIRS=('scripts','tests','.github')
-TOOLING_FILES=('package.json','package-lock.json','forward.mjs','screen-stream.mjs')
+TOOLING_FILES=('package.json','package-lock.json','forward.mjs','screen-stream.mjs','device-connection.mjs','wda-mirroring.patch')
 
 
 def package_files(source_package=False):

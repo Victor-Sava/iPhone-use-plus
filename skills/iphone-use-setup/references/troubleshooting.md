@@ -34,4 +34,4 @@ PUA 路径不依赖 Mac 的 iPhone 镜像窗口、显示器原点或镜像锁屏
 
 ## 镜像与 PUA 占用冲突
 
-`mirroring_conflict`、设置页空树或“正在从 Mac 使用此 iPhone”的锁屏截图：退出 Mac 的 iPhone 镜像，必要时用户解锁手机，重新调用 pua_ready。不要通过重复 launch、tap 或强制输入在空树状态继续任务。仅镜像进程存在不证明占用；工具在树为空且镜像运行时拒绝 READY。
+镜像下空树或黑屏：本分支不因空树拒绝 READY。先检查最后一个显示选择、手机端 WDA 补丁和预览暂停原因；DisplayMonitor 自动跟随镜像重连。按截图判断动作结果，不重复 launch 或输入；真实密码/Face ID 要求仍由用户完成。

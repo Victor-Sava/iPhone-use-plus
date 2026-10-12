@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_controller.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import base64
 import copy
 import json
@@ -70,7 +74,7 @@ class FakeWDA:
             return {"value": {"ready": self.status_ready}}
         raise AssertionError("Unexpected request: " + path)
 
-    def ensure_session(self):
+    def ensure_session(self, timeout=None, refresh_display=False):
         if self.session_id is None:
             self.calls.append(("POST", "/session", None))
             self.session_id = "fake-session"

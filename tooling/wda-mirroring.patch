@@ -1,0 +1,248 @@
+diff --git a/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.h b/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.h
+index 97a67ed..79e1faa 100644
+--- a/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.h
++++ b/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.h
+@@ -1,3 +1,9 @@
++/**
++ * [INPUT]: XCTest、FBElementCache 与显示点坐标
++ * [OUTPUT]: 应用手势与选定显示手势契约
++ * [POS]: Categories 手势入口，由命令层调用、实现层合成事件
++ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
++ */
+ /**
+  * Copyright (c) 2015-present, Facebook, Inc.
+  * All rights reserved.
+@@ -54,6 +60,12 @@ NS_ASSUME_NONNULL_BEGIN
+                        error:(NSError * _Nullable*)error;
+ 
+ #if !TARGET_OS_TV && !TARGET_OS_WATCH
++// 使用当前截图显示的点坐标，不依赖物理屏幕前台应用。
+++ (BOOL)fb_performScreenGestureFromPoint:(CGPoint)startPoint
++                               toPoint:(CGPoint)endPoint
++                         pressDuration:(NSTimeInterval)duration
++                                 error:(NSError * _Nullable*)error;
++
+ /**
+  Builds the synthesized event used by
+  -fb_pressAtCoordinate:forDuration:thenDragToCoordinate:withVelocity:thenHoldForDuration:error:
+diff --git a/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.m b/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.m
+index 38fdffe..ba1bea2 100644
+--- a/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.m
++++ b/WebDriverAgentLib/Categories/XCUIApplication+FBTouchAction.m
+@@ -1,3 +1,9 @@
++/**
++ * [INPUT]: FBScreen 选定显示、XCTest 事件合成与现有手势路径构建器
++ * [OUTPUT]: 应用手势及按选定显示发送的坐标点击/拖动
++ * [POS]: Categories 输入适配层；镜像坐标不再依赖实体屏幕前台应用
++ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
++ */
+ /**
+  * Copyright (c) 2015-present, Facebook, Inc.
+  * All rights reserved.
+@@ -13,6 +19,8 @@
+ 
+ #import "FBBaseActionsSynthesizer.h"
+ #import "FBConfiguration.h"
++#import "FBScreen.h"
++#import "XCUIScreen.h"
+ #import "FBErrorBuilder.h"
+ #import "FBExceptions.h"
+ #import "FBLogger.h"
+@@ -72,6 +80,39 @@ static BOOL FBIsFinitePoint(CGPoint point)
+ 
+ @implementation XCUIApplication (FBTouchAction)
+ 
++// --- 显示路由：与截图共用 currentDisplayId ---
+++ (BOOL)fb_performScreenGestureFromPoint:(CGPoint)startPoint
++                               toPoint:(CGPoint)endPoint
++                         pressDuration:(NSTimeInterval)duration
++                                 error:(NSError **)error
++{
++  XCUIScreen *screen = [FBScreen currentScreenWithError:error];
++  if (nil == screen) {
++    return NO;
++  }
++  CGRect bounds = CGRectMake(0, 0, screen.bounds.size.width / screen.scale,
++                            screen.bounds.size.height / screen.scale);
++  if (!FBIsFinitePoint(startPoint) || !FBIsFinitePoint(endPoint)
++      || !CGRectContainsPoint(bounds, startPoint) || !CGRectContainsPoint(bounds, endPoint)
++      || !isfinite(duration) || duration < 0) {
++    return [[FBErrorBuilder.builder withDescription:@"Gesture coordinates or duration are invalid for the selected display"] buildError:error];
++  }
++  if (![XCSynthesizedEventRecord instancesRespondToSelector:@selector(initWithName:displayID:interfaceOrientation:)]) {
++    return [[FBErrorBuilder.builder withDescription:@"This XCTest runtime cannot route gestures to a selected display"] buildError:error];
++  }
++  [FBLogger logFmt:@"Selected display %@ gesture %@ -> %@", @(screen.displayID),
++    NSStringFromCGPoint(startPoint), NSStringFromCGPoint(endPoint)];
++  // 镜像截图为显示原生方向；不使用实体设备姿态或 SpringBoard 的方向。
++  XCSynthesizedEventRecord *event = [self fb_pressDragEventFromPoint:startPoint
++                                                     forDuration:duration
++                                                         toPoint:endPoint
++                                                 pointsPerSecond:FBPointsPerSecondForDragVelocity(XCUIGestureVelocityDefault)
++                                             thenHoldForDuration:0
++                                                       displayID:screen.displayID
++                                            interfaceOrientation:UIInterfaceOrientationPortrait];
++  return [FBXCTestDaemonsProxy synthesizeEventWithRecord:event error:error];
++}
++
+ + (BOOL)handleEventSynthesWithError:(NSError *)error
+ {
+   if ([error.localizedDescription containsString:@"not visible"]) {
+diff --git a/WebDriverAgentLib/Commands/FBElementCommands.m b/WebDriverAgentLib/Commands/FBElementCommands.m
+index 97afb7b..69ff3e9 100644
+--- a/WebDriverAgentLib/Commands/FBElementCommands.m
++++ b/WebDriverAgentLib/Commands/FBElementCommands.m
+@@ -1,3 +1,9 @@
++/**
++ * [INPUT]: FBSession 元素缓存、FBScreen 显示选择与 FBTouchAction 手势实现
++ * [OUTPUT]: WDA 元素及坐标命令；非主显示坐标操作显式路由
++ * [POS]: Commands HTTP 边界；保留主屏及元素相对操作语义
++ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
++ */
+ /**
+  * Copyright (c) 2015-present, Facebook, Inc.
+  * All rights reserved.
+@@ -9,6 +15,7 @@
+ #import "FBElementCommands.h"
+ 
+ #import "FBConfiguration.h"
++#import "FBScreen.h"
+ #import "FBKeyboard.h"
+ #import "FBRoute.h"
+ #import "FBRouteRequest.h"
+@@ -241,7 +248,18 @@ + (NSArray *)routes
+ {
+   FBElementCache *elementCache = request.session.elementCache;
+   XCUIElement *element = [elementCache elementForUUID:(NSString *)request.parameters[@"uuid"] checkStaleness:YES];
+-#if TARGET_OS_IOS || TARGET_OS_WATCH
++#if TARGET_OS_IOS
++  if (nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID]) {
++    NSError *error = nil;
++    CGRect frame = element.wdFrame;
++    CGPoint point = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
++    return [XCUIApplication fb_performScreenGestureFromPoint:point toPoint:point pressDuration:0.05 error:&error]
++      ? FBResponseWithOK()
++      : FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.localizedDescription traceback:nil]);
++  }
++  [element tap];
++#elif TARGET_OS_WATCH
+   [element tap];
+ #elif TARGET_OS_TV
+   NSError *error = nil;
+@@ -446,6 +464,16 @@ + (NSArray *)routes
+ 
+ + (id<FBResponsePayload>)handleDrag:(FBRouteRequest *)request
+ {
++  if (nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID] && nil == request.parameters[@"uuid"]) {
++    NSError *error = nil;
++    CGPoint start = CGPointMake([request.arguments[@"fromX"] doubleValue], [request.arguments[@"fromY"] doubleValue]);
++    CGPoint end = CGPointMake([request.arguments[@"toX"] doubleValue], [request.arguments[@"toY"] doubleValue]);
++    return [XCUIApplication fb_performScreenGestureFromPoint:start toPoint:end
++                                            pressDuration:[request.arguments[@"duration"] doubleValue] error:&error]
++      ? FBResponseWithOK()
++      : FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.localizedDescription traceback:nil]);
++  }
+   XCUIElement *target = [self targetFromRequest:request];
+   NSError *error;
+   CGVector startOffset = CGVectorMake([request.arguments[@"fromX"] doubleValue],
+@@ -499,6 +527,17 @@ + (NSArray *)routes
+ 
+ + (id<FBResponsePayload>)handleTap:(FBRouteRequest *)request
+ {
++  if (nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID] && nil == request.parameters[@"uuid"]) {
++    NSError *error = nil;
++    if (nil == request.arguments[@"x"] || nil == request.arguments[@"y"]) {
++      return FBResponseWithStatus([FBCommandStatus invalidArgumentErrorWithMessage:@"Both x and y are required" traceback:nil]);
++    }
++    CGPoint point = CGPointMake([request.arguments[@"x"] doubleValue], [request.arguments[@"y"] doubleValue]);
++    return [XCUIApplication fb_performScreenGestureFromPoint:point toPoint:point pressDuration:0.05 error:&error]
++      ? FBResponseWithOK()
++      : FBResponseWithStatus([FBCommandStatus invalidElementStateErrorWithMessage:error.localizedDescription traceback:nil]);
++  }
+   NSError *error;
+   id target = [self targetWithXyCoordinatesFromRequest:request error:&error];
+   if (nil == target) {
+diff --git a/WebDriverAgentLib/Routing/FBSession.m b/WebDriverAgentLib/Routing/FBSession.m
+index 1eac8bc..dee3f50 100644
+--- a/WebDriverAgentLib/Routing/FBSession.m
++++ b/WebDriverAgentLib/Routing/FBSession.m
+@@ -1,3 +1,9 @@
++/**
++ * [INPUT]: XCTest 应用状态、FBScreen 显示配置与会话控件缓存
++ * [OUTPUT]: 会话生命周期及当前应用；镜像优先最近显式激活且仍前台的应用
++ * [POS]: Routing 状态边界；退出前台后回到上游检测，不强制读取后台应用
++ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
++ */
+ /**
+  * Copyright (c) 2015-present, Facebook, Inc.
+  * All rights reserved.
+@@ -14,6 +20,7 @@
+ #import "FBXCAccessibilityElement.h"
+ #import "FBAlertsMonitor.h"
+ #import "FBConfiguration.h"
++#import "FBScreen.h"
+ #import "FBElementCache.h"
+ #import "FBExceptions.h"
+ #import "FBMacros.h"
+@@ -44,6 +51,7 @@
+ 
+ @interface FBSession ()
+ @property (nullable, nonatomic) XCUIApplication *testedApplication;
++@property (nullable, nonatomic) XCUIApplication *lastActivatedApplication;
+ @property (nonatomic) BOOL isTestedApplicationExpectedToRun;
+ @property (nonatomic) BOOL shouldAppsWaitForQuiescence;
+ @property (nonatomic, nullable) FBAlertsMonitor *alertsMonitor;
+@@ -356,6 +364,13 @@ - (XCUIApplication *)activeApplication
+     return [self makeApplicationWithBundleId:defaultBundleId];
+   }
+ 
++  // 镜像前台不在主屏 AX activeApplications 列表中；仅复用仍处于前台的显式启动目标。
++  if (isAuto && nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID]
++      && self.lastActivatedApplication.state >= XCUIApplicationStateRunningForeground) {
++    return self.lastActivatedApplication;
++  }
++
+   if (nil != self.testedApplication) {
+     XCUIApplicationState testedAppState = self.testedApplication.state;
+     if (testedAppState >= XCUIApplicationStateRunningForeground) {
+@@ -388,6 +403,13 @@ - (XCUIApplication *)launchApplicationWithBundleId:(NSString *)bundleIdentifier
+                                        environment:(nullable NSDictionary <NSString *, NSString *> *)environment
+ {
+   XCUIApplication *app = [self makeApplicationWithBundleId:bundleIdentifier];
++  // 已在镜像前台时只绑定上下文；重复 activate 会把设备切回实体屏幕。
++  if (nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID]
++      && app.state >= XCUIApplicationStateRunningForeground) {
++    self.lastActivatedApplication = app;
++    return app;
++  }
+   if (nil == shouldWaitForQuiescence) {
+     // Iherit the quiescence check setting from the main app under test by default
+     app.fb_shouldWaitForQuiescence = nil != self.testedApplication && self.shouldAppsWaitForQuiescence;
+@@ -404,13 +426,22 @@ - (XCUIApplication *)launchApplicationWithBundleId:(NSString *)bundleIdentifier
+   if ([app fb_isSameAppAs:self.testedApplication]) {
+     self.isTestedApplicationExpectedToRun = YES;
+   }
++  self.lastActivatedApplication = app;
+   return app;
+ }
+ 
+ - (XCUIApplication *)activateApplicationWithBundleId:(NSString *)bundleIdentifier
+ {
+   XCUIApplication *app = [self makeApplicationWithBundleId:bundleIdentifier];
++  // 已在镜像前台时只绑定上下文；重复 activate 会把设备切回实体屏幕。
++  if (nil != FBConfiguration.sharedInstance.currentDisplayId
++      && FBConfiguration.sharedInstance.currentDisplayId.longLongValue != [FBScreen displayID]
++      && app.state >= XCUIApplicationStateRunningForeground) {
++    self.lastActivatedApplication = app;
++    return app;
++  }
+   [app activate];
++  self.lastActivatedApplication = app;
+   return app;
+ }
+ 

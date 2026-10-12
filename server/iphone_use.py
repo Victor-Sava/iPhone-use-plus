@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Dependency-free local MCP stdio entrypoint for iPhone Use."""
+"""Dependency-free local MCP stdio entrypoint for iPhone Use.
+
+[INPUT]: 依赖 WDA 客户端、控制器、设备配置与屏幕服务完成 MCP 请求。
+[OUTPUT]: 提供本地 MCP 工具入口、Runtime 调度与 READY 通道证明。
+[POS]: server 的协议入口；锁屏和镜像空树作为观测状态，不在入口拒绝请求。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
 import argparse
 import base64
 import collections
@@ -415,13 +421,12 @@ class Runtime:
         except Exception:lock_pause=None
         status=self.client.request("GET","/status").get("value") or {}
         if status.get("ready") is not True:raise WDAError("not_ready","PUA is not accepting commands. Run pua_doctor and inspect setup status.")
-        if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself, keep it awake, and verify READY again.")
-        sid=self.client.ensure_session()
+        phone_unlocked=self.client.request("GET","/wda/locked").get("value") is False
+        sid=self.client.ensure_session(refresh_display=True)
         observation=self.phone.observe("both" if screenshot else "tree")
-        if observation.get("total_nodes",0)==0 and self.setup_manager.mirroring_running():raise WDAError("mirroring_conflict","iPhone Mirroring is running and PUA exposes an empty phone tree. Quit Mirroring, unlock if needed, then verify READY again.")
-        result={"ready":True,"state":"ready","proof":{"status_ready":True,"phone_unlocked":True,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
+        result={"ready":True,"state":"ready","proof":{"status_ready":True,"phone_unlocked":phone_unlocked,"session_usable":bool(sid),"foreground_resolved":True,"source_readable":True,"viewport_readable":True,"screenshot_readable":screenshot},"observation":observation}
         try:
-            self.screen.resume_after_unlock(lock_pause)
+            if phone_unlocked:self.screen.resume_after_unlock(lock_pause)
             result["preview"]=self.screen.pause_status()
         except Exception:pass  # Display state must not invalidate a healthy control channel.
         return result
@@ -514,8 +519,6 @@ class Runtime:
                 if args.get("reset"):
                     self.client.clear_metrics();self.phone.tool_records.clear();self.responses.clear();self._replied_at=None
                 return result
-            if op in ("tap","swipe","type_text","launch_app","press_button","batch","scroll_find","collect_list"):
-                if self.client.request("GET","/wda/locked").get("value") is not False:raise WDAError("phone_locked","Unlock the iPhone yourself before operations; observe again afterward.")
             return getattr(self.phone,op)(**args)
         except WDAError as exc:
             error=exc.code

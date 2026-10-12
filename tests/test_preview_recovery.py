@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_preview_recovery.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """Unlock recovery uses real shared preview state and a fake WDA channel."""
 import json
 from pathlib import Path
@@ -37,8 +41,10 @@ class PreviewRecoveryTests(unittest.TestCase):
 
     def lock_failure(self):
         self.client.locked = True
-        with self.assertRaises(WDAError) as caught:
-            self.ready()
+        # 只由底层真实锁屏错误产生暂停，锁屏状态标记本身不再拒绝 READY。
+        with patch.object(self.runtime.phone, "observe", side_effect=WDAError("phone_locked", "Device requires unlock")):
+            with self.assertRaises(WDAError) as caught:
+                self.ready()
         self.assertEqual(caught.exception.code, "phone_locked")
 
     def test_unlock_ready_clears_shared_lock_pause_and_allows_new_pixels(self):

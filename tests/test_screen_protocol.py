@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_screen_protocol.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import contextlib
 import fcntl
 import io
@@ -238,7 +242,8 @@ class ScreenProtocolTests(unittest.TestCase):
         with patch.object(runtime.setup_manager, "setup", return_value={"configured": True}):
             status = self.call_over_stdio(runtime, "pua_setup", {"action": "status"})
         client.locked = True
-        failed = self.call_over_stdio(runtime, "pua_ready", {"screenshot": False, "recover": False})
+        with patch.object(runtime.client, "request", side_effect=WDAError("phone_locked", "Device requires unlock")):
+            failed = self.call_over_stdio(runtime, "pua_ready", {"screenshot": False, "recover": False})
         self.assertNotIn("_meta", status)
         self.assertNotIn("_meta", failed)
         self.assertTrue(failed["isError"])
@@ -280,7 +285,7 @@ class ScreenProtocolTests(unittest.TestCase):
         client.session = request
         result = runtime.call("pua_tap", {"x": 120, "y": 240})
         self.assertTrue(result["action_executed"])
-        self.assertEqual([path for _, path, _ in client.calls], ["/wda/locked", "/window/size", "/wda/tap"])
+        self.assertEqual([path for _, path, _ in client.calls], ["/window/size", "/wda/tap"])
         self.assertEqual([event for event in at_action if event[0] == "tap"],
                          [("tap", {"point": {"x": 120, "y": 240}, "viewport": client.size})])
         self.assertEqual(screen.events[0], ("begin", {"op": "tap"}))
@@ -306,7 +311,7 @@ class ScreenProtocolTests(unittest.TestCase):
         self.assertEqual(events[0]["to_point"], {"x": action["toX"], "y": action["toY"]})
         self.assertEqual(events[0]["viewport"], client.size)
         self.assertEqual(client.swipe_count, 1)
-        self.assertEqual([path for _, path, _ in client.calls], ["/wda/locked", "/window/size", "/wda/dragfromtoforduration"])
+        self.assertEqual([path for _, path, _ in client.calls], ["/window/size", "/wda/dragfromtoforduration"])
 
     def test_preview_telemetry_never_contains_input_text_or_selector(self):
         runtime, client, screen = self.runtime()
@@ -331,8 +336,11 @@ class ScreenProtocolTests(unittest.TestCase):
                 else:
                     client.locked = True
                     name, args, code = "pua_tap", {"x": 100, "y": 220}, "phone_locked"
-                with self.assertRaises(WDAError) as caught:
-                    runtime.call(name, args)
+                with contextlib.ExitStack() as stack:
+                    if not secure_field:
+                        stack.enter_context(patch.object(runtime.phone, "tap", side_effect=WDAError("phone_locked", "Device requires unlock")))
+                    with self.assertRaises(WDAError) as caught:
+                        runtime.call(name, args)
                 self.assertEqual(caught.exception.code, code)
                 self.assertTrue(screen.is_paused)
                 self.assertEqual(client.actions(), [])
@@ -344,7 +352,7 @@ class ScreenProtocolTests(unittest.TestCase):
             setattr(screen, method, Mock(side_effect=OSError("display unavailable")))
         result = runtime.call("pua_tap", {"x": 120, "y": 240})
         self.assertTrue(result["action_executed"])
-        self.assertEqual([path for _, path, _ in client.calls], ["/wda/locked", "/window/size", "/wda/tap"])
+        self.assertEqual([path for _, path, _ in client.calls], ["/window/size", "/wda/tap"])
         self.assertEqual([path for _, path, _ in client.actions()], ["/wda/tap"])
 
     def test_ready_preview_failure_cannot_break_channel_readiness(self):

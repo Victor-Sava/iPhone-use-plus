@@ -1,3 +1,7 @@
+# [INPUT]: Runtime/WDA 实现与隔离测试替身。
+# [OUTPUT]: test_protocol.py 的行为回归验证，区分锁屏状态与真实认证错误。
+# [POS]: tests 协议、传输与恢复验收层，不替代真机验证。
+# [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 import contextlib
 import io
 import json
@@ -115,7 +119,7 @@ class ProtocolTests(unittest.TestCase):
                 if case == "owner":
                     client.app = "local.pid.0"
                 elif case == "locked":
-                    client.locked = True
+                    client.source = Mock(side_effect=WDAError("phone_locked", "Device requires unlock"))
                 else:
                     client.source = Mock(side_effect=WDAError("device-fault", "Unexpected channel fault"))
                 result = self.serve_ready(runtime, {"screenshot": False})
@@ -489,30 +493,29 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(json.loads(cache.read_text()), {"url": first.base_url, "session_id": "shared-session-123"})
         self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
 
-    def test_locked_phone_blocks_mutations_before_semantic_lookup(self):
+    def test_locked_phone_delegates_mutations_to_wda_once(self):
         runtime, client = self.runtime()
         client.locked = True
-        with self.assertRaises(WDAError) as caught:
-            runtime.call("pua_tap", {"selector": {"label": "Target"}, "observe": "none"})
-        self.assertEqual(caught.exception.code, "phone_locked")
-        self.assertEqual(client.calls, [("GET", "/wda/locked", None)])
-        self.assertEqual(client.actions(), [])
+        result = runtime.call("pua_tap", {"selector": {"label": "Target"}, "observe": "none"})
+        self.assertTrue(result["action_executed"])
+        self.assertFalse(any(path == "/wda/locked" for _, path, _ in client.calls))
+        self.assertEqual(len(client.actions()), 1)
 
-    def test_ready_requires_unlocked_phone_before_session_or_observation(self):
+    def test_ready_reports_locked_state_without_refusing_session(self):
         runtime, client = self.runtime()
         client.locked = True
-        with self.assertRaises(WDAError) as caught:
-            runtime.call("pua_ready", {"screenshot": False})
-        self.assertEqual(caught.exception.code, "phone_locked")
-        self.assertEqual(client.calls, [("GET", "/status", None), ("GET", "/wda/locked", None)])
-        self.assertIsNone(client.session_id)
+        result = runtime.call("pua_ready", {"screenshot": False})
+        self.assertTrue(result["ready"])
+        self.assertFalse(result["proof"]["phone_unlocked"])
+        self.assertIsNotNone(client.session_id)
 
-    def test_ready_empty_tree_with_mirroring_running_reports_conflict(self):
+    def test_ready_empty_mirror_tree_is_observed_without_phone_mutation(self):
         runtime, client = self.runtime()
         client.nodes = []
-        with patch.object(runtime.setup_manager, "mirroring_running", return_value=True), self.assertRaises(WDAError) as caught:
-            runtime.call("pua_ready", {"screenshot": False})
-        self.assertEqual(caught.exception.code, "mirroring_conflict")
+        with patch.object(runtime.setup_manager, "mirroring_running", return_value=True):
+            result = runtime.call("pua_ready", {"screenshot": False})
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["observation"]["total_nodes"], 0)
         self.assertFalse(any(path in ("/wda/tap", "/wda/keys") for _, path, _ in client.actions()))
 
     def test_ready_nonempty_tree_proves_unlocked_usable_phone(self):

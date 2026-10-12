@@ -1,6 +1,13 @@
-// A single owned USB connection to WDA's independent MJPEG port. stdout is JPEG
+/**
+ * [INPUT]: 依赖 device-connection.mjs 与 WDA MJPEG 视频端口。
+ * [OUTPUT]: 向 stdout 输出原始 JPEG 流，交给 ScreenHub 展示。
+ * [POS]: 屏幕预览子进程，与控制代理共用无线设备配置。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+// A single owned device connection to WDA's independent MJPEG port. stdout is JPEG
 // stream bytes only; this program never binds a listener or touches XCTest.
 import http from 'node:http';
+import {connectDevicePort} from './device-connection.mjs';
 
 // Device-library diagnostics must never corrupt the binary pipe or expose IDs.
 for (const method of ['log', 'info', 'warn', 'error', 'debug']) console[method] = () => {};
@@ -28,14 +35,13 @@ process.on('SIGTERM', () => stop());
 process.stdout.on('error', () => stop());
 
 try {
-  const {default: iosDevice} = await import('appium-ios-device');
-  socket = await iosDevice.utilities.connectPort(udid, devicePort);
+  socket = await connectDevicePort(udid, devicePort);
   if (stopping) socket.destroy();
   else {
     socket.setNoDelay?.(true);
     socket.on('error', () => stop(1));
     // Node's HTTP parser removes chunked-transfer framing before writing stdout.
-    // This agent always returns the already connected USB socket: no DNS/TCP hop.
+    // 复用已连接的 USB/Wi-Fi socket；HTTP 层不另建连接。
     agent = new http.Agent({keepAlive: false});
     agent.createConnection = () => socket;
     request = http.request({host: '127.0.0.1', port: devicePort, path: '/',

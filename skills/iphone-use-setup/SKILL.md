@@ -2,6 +2,10 @@
 name: iphone-use-setup
 description: 配置 PUA（Phone Use Agent），在用户自己的 iPhone 上安装、签名并启动手机端执行服务；本对话首次使用先直接 setup，再验 READY，服务未启动时复用配置与构建启动，诊断 USB 和 Xcode 连接并打开手机屏幕侧边栏；适用于首次配置、冷启动、断线恢复或签名过期。
 ---
+## 本地修改：允许锁屏及镜像并存尝试
+
+Runtime 已移除锁屏前置拒绝与镜像空树冲突拒绝。READY 的 `proof.phone_unlocked` 为实际状态，不要求其为 true；锁屏或镜像空树本身不要求退出镜像或解锁。动作交给 WDA，依据真实返回判断是否可用，不能把 READY 或空树当作操作成功。底层返回真实认证要求时仍由用户完成，密码和 Face ID 接管规则不变。配合本地 WDA 镜像补丁，已验证锁屏镜像下坐标/控件点击、Home、滑动和 Spotlight 中文输入；其他 App 与系统激活仍需实际验收，见屏幕说明。
+
 
 # 把 iPhone 配置为 READY
 
@@ -11,7 +15,7 @@ description: 配置 PUA（Phone Use Agent），在用户自己的 iPhone 上安�
 
 本对话首次使用手机、尚未取得 READY 时，先直接调用 `pua_setup(action="status")`，按下节复用健康服务或活动工作，缺少服务才 start 一次；服务就绪后调用 `pua_ready(recover=true, screenshot=false)`，再执行用户手机任务。不要先 READY 失败再 setup；不以之前聊天的 READY 或已安装插件代替当前证明。本对话已 READY 且通道未失效时直接继续，不为每项任务重复 doctor、discover、build 和 start。首次配置或 READY 返回具体缺项时，使用 `pua_doctor` 与 `pua_setup(action="discover")` 读取 Xcode、已连接设备、签名、端口及进程状态。多台 iPhone 按用户提供的设备选择；只有一台符合条件时可以直接使用。设备 UDID、Team ID、日志和签名配置保存在用户本机，不写进源码或 Git。
 
-正常任务调用 `pua_ready(recover=true)` 或省略 recover 使用默认 true，不因预检或谨慎主动关闭恢复。只读诊断或用户明确禁止重启时传 `recover=false`，保留限制。常规任务无需截图时可传 `screenshot=false`；截图能力待实际需要截图时再使用。返回 `ready=true, state="ready"` 的 proof 包含 PUA status、可用会话、真实前台 App、设备视口、解锁状态与当前观察；直接用嵌套 observation 准备下一步，不立即重复 observe 或再做一轮导航测试。若镜像占用且控件树为空，工具返回 `mirroring_conflict`，退出镜像后重验 READY。Runner 图标、BUILD SUCCEEDED 或端口开放不足以声明 READY。READY 同时关联手机屏幕侧边栏，宿主支持时默认打开；已有通道要重新打开画面用 `pua_screen()`，不要重复 READY。预览走独立 USB MJPEG 通道（默认设备端口 9100），不使用 XML 或截图轮询；预览不可用本身不否定控制通道 READY，也不要求循环重启。READY 证明控制通道可用；常规 App 操作默认乐观执行，下一步所需观察顺带判断进度，最终关键结果才显式验收。
+正常任务调用 `pua_ready(recover=true)` 或省略 recover 使用默认 true，不因预检或谨慎主动关闭恢复。只读诊断或用户明确禁止重启时传 `recover=false`，保留限制。常规任务无需截图时可传 `screenshot=false`；截图能力待实际需要截图时再使用。返回 `ready=true, state="ready"` 的 proof 包含 PUA status、可用会话、真实前台 App、设备视口、解锁状态与当前观察；直接用嵌套 observation 准备下一步，不立即重复 observe 或再做一轮导航测试。镜像空树本身不拒绝 READY；按实际截图与底层错误处理，不能据此认定动作成功。Runner 图标、BUILD SUCCEEDED 或端口开放不足以声明 READY。READY 同时关联手机屏幕侧边栏，宿主支持时默认打开；已有通道要重新打开画面用 `pua_screen()`，不要重复 READY。预览走独立 USB MJPEG 通道（默认设备端口 9100），不使用 XML 或截图轮询；预览不可用本身不否定控制通道 READY，也不要求循环重启。READY 证明控制通道可用；常规 App 操作默认乐观执行，下一步所需观察顺带判断进度，最终关键结果才显式验收。
 
 `phone_locked` 会自动暂停预览并记录 `device_locked`，无需再显式 pause。等待用户实际解锁通知后重验 READY；成功时仅解除同一次锁屏暂停，App 认证与旧版未知暂停保持显式恢复。READY 的 `preview` 返回暂停原因；不要把预览空白当成控制通道失效。
 
@@ -33,7 +37,7 @@ description: 配置 PUA（Phone Use Agent），在用户自己的 iPhone 上安�
 2. 用数据线连接 iPhone；首次配对在手机上点“信任此电脑”。从 Xcode 的 Devices and Simulators 或 discover 返回确认设备已被识别；只有 Finder 可见不代表已完成开发配对。
 3. 根据实际系统提示开启“设置 → 隐私与安全性 → 开发者模式”，完成重启后的确认。若没有该入口，先让 Xcode 完成设备配对和开发准备，再重新检查；不要把缺少入口判断为永久不支持。需要时检查“设置 → 开发者 → 启用 UI 自动化”。
 4. 用 `pua_setup(action="fetch")` 获取 PUA 使用的固定版本手机端执行服务，然后 `configure` 配置用户的 `udid`、`team_id` 和可签名 `bundle_id`；可选 `source_dir`、`local_port`、`device_port`，默认本机转发端口 18100、设备端口 8100。本机运行数据默认在 `~/.local/share/iphone-use`。不要照搬作者的 UDID、Team ID 或签名。自动签名失败时按返回日志查看 Runner target 的 Signing & Capabilities，选择用户自己的 Team；只有错误要求时才调整 bundle ID 或 provisioning。
-5. 用 `build` 构建，然后 `start` 安装并启动 Runner 测试服务及本机 USB 转发。fetch/build/start 是后台工作；记录 job_id，用 `pua_setup(action="status", job_id=...)` 查询已有工作，从返回 `jobs` 数组按 id 找到它，不假定 status 返回单个 job。fetch / build 看终态，失败时读准确日志；start 是长期 Runner，工作仍 running 且 `service.ready=true` 时即可调用 READY，不等 succeeded、不重复 start。按状态、日志及返回的 retry_after_seconds 查询，不固定长间隔或固定次数盲等。start 使用当前配置的成功构建产物，默认保留数据线并保持设备可供 UI 测试使用。
+5. 首次使用本分支时，按仓库 README.plus.md 对配置中的固定 WDA 源码应用 tooling/wda-mirroring.patch（先 git apply --check，已应用则复用，不覆盖其他修改）。用 `build` 构建，然后 `start` 安装并启动 Runner 测试服务及本机 USB 转发。fetch/build/start 是后台工作；记录 job_id，用 `pua_setup(action="status", job_id=...)` 查询已有工作，从返回 `jobs` 数组按 id 找到它，不假定 status 返回单个 job。fetch / build 看终态，失败时读准确日志；start 是长期 Runner，工作仍 running 且 `service.ready=true` 时即可调用 READY，不等 succeeded、不重复 start。按状态、日志及返回的 retry_after_seconds 查询，不固定长间隔或固定次数盲等。start 使用当前配置的成功构建产物，默认保留数据线并保持设备可供 UI 测试使用。
 6. 若手机或 Xcode 报开发者不受信任，按当前设备的“设置 → 通用 → VPN 与设备管理”及其开发者条目完成验证；以当前提示为准，不把企业 App 的流程套用于所有开发签名。再执行 `status` 和 `pua_ready`。
 
 账号登录、密码、设备解锁、手机确认或 Xcode 安装确实需要用户完成时，说明准确页面、阻塞原因和完成后继续的步骤，并必须调用可用的宿主提问工具（Default 优先 `functions.request_user_input_async`），首个选项固定「已完成继续」，第二个可为「暂时无法完成」。异步返回、预选或经过一段时间不代表用户完成；收到用户实际选择「已完成继续」或明确完成回复才继续依赖该步骤的配置。只有宿主没有提问能力时才用文字等待说明。其余独立配置可以继续执行。不要为已授权的本机安装再加入统一确认关卡。不要删除用户已有开发 App、吊销共享证书或付费升级账户来绕过错误。
@@ -55,3 +59,5 @@ READY 已返回设备、会话、视口和当前 observation，复用这些信�
 Apple 的 [开发者账户说明](https://developer.apple.com/help/account/basics/about-your-developer-account)说明 Personal Team 最多可安装 3 个 App / 设备，provisioning profile 自签发起 7 天过期，届时需要重建重装。免费账户可用于个人设备测试，不能据此承诺永久运行。
 
 [Apple 开发者模式](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)与 [Appium 真机准备](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/device-setup/)提供配对、开发模式与签名要求。流程以当前 Xcode/iOS 的实际提示和工具诊断为准；本插件不要求越狱。
+
+显示选择：会话初始化及每次显式 READY 按 `/wda/screens` 返回顺序选择最后一个显示，供截图与 MJPEG 预览共用；不是固定 2，也不是编号最大值。镜像连接或退出后执行 READY 刷新选择，普通操作不额外枚举。

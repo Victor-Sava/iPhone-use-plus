@@ -29,3 +29,17 @@ python3 scripts/check_screen_ui.py
 ```
 
 UI 不依赖 CDN 或远程字体；服务端预览依赖的 USB 流脚本与 `tooling/` 依赖清单也随插件提供。`docs/` 与 `evals/` 为本地开发资料，不是运行时依赖。
+
+## Wi-Fi 传输
+
+本地运行目录 `wireless.json` 存在时，控制代理与 MJPEG 预览共用其中的 `udid` 和私网 IPv4 `host`；UDID 必须匹配选定手机。缺少此文件使用 USB，格式错误或设备不符时报错。网络地址变化需更新该文件；移除后恢复 USB，新连接生效。首次从 USB 切换时重启 setup 管理的服务，不终止 MCP 插件进程。无线 READY 与预览出帧需分别验收，端口可达不能替代实际截图。
+
+
+## 本地 WDA 镜像输入补丁
+
+`tooling/wda-mirroring.patch` 让非主显示坐标点击、元素点击及拖动使用截图同一 `currentDisplayId`。元素中心取控件树同源的 `wdFrame`，不能用原生 `frame`。已真机验证锁屏镜像下坐标点击、控件点击、Home、足够范围的滑动和 Spotlight 中文输入；这不代表所有 App/所有动作通用可用。
+
+应用已在镜像前台时，重复 launch 只绑定上下文，不重复 activate。打开其他 App 优先通过镜像画面的桌面/搜索图标导航，再对已前台应用绑定；系统 activate 其他应用仍可能打断镜像。用户手工换应用后以新观察为准，禁止重放不确定动作。镜像连接/断开由 WDA 服务内 DisplayMonitor 自动跟随最后一个显示，通常两秒内生效；只有服务异常或显式诊断需要 READY。
+
+
+自动恢复只解除同一 pause_id 的 `device_locked` 暂停；`authentication` 和旧版未知暂停保留人工恢复。认证暂停期间观察器不发起 WDA 请求，不抓图、不读控件、不激活应用。显示观察器与手机操作共用 operation.lock，忙时跳过本轮，并复用现有会话，服务停止时一并退出。

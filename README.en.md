@@ -1,4 +1,6 @@
-# iPhone Use
+# iPhone Use Plus
+
+See [Plus notes](README.plus.md) for mirroring/Wi-Fi changes, WDA patch installation, and limitations.
 
 [中文](README.md) · **English**
 
@@ -18,7 +20,7 @@ Paste this prompt into Codex running on your Mac:
 
 ```text
 Install and configure iPhone Use for me:
-https://github.com/zhongerxin/iPhone-use
+https://github.com/Victor-Sava/iPhone-use-plus
 
 Read the repository README and installation script first. Check Codex CLI,
 Python, Node.js, npm, full Xcode, and the iPhone connected over USB.
@@ -69,8 +71,8 @@ After installing the plugin and configuring USB connectivity, start phone tasks 
 ## Install and connect
 
 ```sh
-git clone https://github.com/zhongerxin/iPhone-use.git
-cd iPhone-use
+git clone https://github.com/Victor-Sava/iPhone-use-plus.git
+cd iPhone-use-plus
 sh scripts/install.sh
 ```
 

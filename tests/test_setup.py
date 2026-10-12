@@ -1,3 +1,8 @@
+"""[INPUT]: SetupManager 生命周期与临时文件/进程替身。
+[OUTPUT]: 安装启动、归属校验及恢复回归验证。
+[POS]: tests 生命周期测试；补丁真实 Git 身份另由 test_local_wda_patch 覆盖。
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
 import os
 import io
 import datetime as dt
@@ -16,6 +21,12 @@ import wda_setup
 
 class SetupTests(unittest.TestCase):
     def setUp(self):
+        source_hash = patch.object(wda_setup.SetupManager, "_source_patch_hash", return_value=None)
+        source_hash.start()
+        self.addCleanup(source_hash.stop)
+        display = patch.object(wda_setup, "DisplayMonitor")
+        display.start().return_value.tick.return_value = None
+        self.addCleanup(display.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.manager = wda_setup.SetupManager(Path(self.temp.name) / "state")
 
